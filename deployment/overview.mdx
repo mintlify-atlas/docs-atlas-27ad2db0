@@ -1,0 +1,94 @@
+---
+title: "Deploy AWS Lambda PDF Generator to AWS"
+sidebarTitle: "Overview"
+description: "Deploy the PDF Generator serverless stack to AWS using the Serverless framework. Creates API Gateway, Lambda functions, and a Chromium Lambda Layer."
+---
+
+The AWS Lambda PDF Generator is deployed as a fully serverless stack using the [Serverless framework](https://www.serverless.com/). Running `yarn deploy:prod` from the project root orchestrates the entire process: it first builds a packaged Chromium Lambda Layer locally via `make`, then provisions all AWS resources — API Gateway, Lambda functions, IAM roles, CloudWatch log groups, and the Chromium layer — in a single CloudFormation changeset. No manual console steps are required.
+
+## Prerequisites
+
+Before deploying, ensure the following tools are installed and configured:
+
+- **[AWS account](https://portal.aws.amazon.com/billing/signup)** with the [AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/cli-chap-welcome.html) configured (`aws configure`)
+- **[Node.js 20.x](https://nodejs.org/en/)** — the [Node Version Manager (nvm)](https://github.com/nvm-sh/nvm) is recommended for managing Node versions
+- **[Yarn](https://classic.yarnpkg.com/en/docs/install)** package manager
+- **[Serverless framework](https://www.serverless.com/framework/docs/providers/aws/guide/installation/) v3.38+** (`npm install -g serverless`)
+
+## What Gets Deployed
+
+A single `yarn deploy:prod` command creates the following AWS resources in your account:
+
+| Resource | Details |
+|---|---|
+| **API Gateway** | HTTP REST endpoint that routes incoming requests to Lambda |
+| **Lambda function — `print`** | Converts HTML to PDF using Puppeteer and Chromium; 2048 MB memory, 30-second timeout |
+| **Lambda function — `serviceRead`** | Returns service metadata (version); lightweight, no Chromium layer |
+| **Lambda Layer — `HeadlessChromium`** | Contains Chromium v122 compatible with `nodejs20.x`; built locally before deploy |
+| **IAM Role** | Grants the Lambda functions `s3:GetObject` and `s3:PutObject` access to the large-response S3 bucket |
+| **CloudWatch Log Groups** | One per Lambda function; logs are retained for **90 days** |
+
+## Deployment Steps
+
+<Steps>
+  <Step title="Clone the repository">
+    Clone the project and navigate into the root directory:
+
+    ```shell
+    git clone https://github.com/barchart/aws-lambda-pdf-generator.git
+    cd aws-lambda-pdf-generator
+    ```
+  </Step>
+
+  <Step title="Install dependencies">
+    Install all workspace dependencies from the monorepo root. Yarn workspaces will link the `packages/api` package automatically:
+
+    ```shell
+    yarn install
+    ```
+  </Step>
+
+  <Step title="Deploy to AWS">
+    Run the appropriate deploy script for your target stage.
+
+    **Production:**
+
+    ```shell
+    yarn deploy:prod
+    ```
+
+    **Staging:**
+
+    ```shell
+    yarn deploy:stage
+    ```
+
+    Before the Serverless CLI is invoked, the `predeploy` script automatically runs `make clean && make all` inside `packages/api`. This clones the [`@sparticuz/chromium`](https://github.com/Sparticuz/chromium) repository at the `v122.0.0` tag, compiles it, and produces the layer artifact at `packages/api/layers/chromium-v122.zip`. The Serverless framework then uploads this artifact as the `HeadlessChromium` Lambda Layer.
+  </Step>
+</Steps>
+
+## Stages
+
+The project supports two named deployment stages. Each stage is an independent CloudFormation stack and creates separate AWS resources:
+
+| Stage | Deploy command | Use case |
+|---|---|---|
+| `stage` | `yarn deploy:stage` | Integration testing, QA validation |
+| `prod` | `yarn deploy:prod` | Live production traffic |
+
+The active stage name is injected into each Lambda function as the `NODE_ENV` environment variable, allowing the application code to branch on environment at runtime.
+
+<Note>
+  Your AWS IAM user or role must have sufficient permissions to deploy this stack. At a minimum, the following service permissions are required: **Lambda**, **API Gateway**, **IAM** (role and policy management), **S3** (deployment bucket access), **CloudFormation**, and **CloudWatch Logs**.
+</Note>
+
+<Tip>
+  If you are re-deploying after a previous installation — especially if the stack name or stage has changed — remove the old stack first to avoid CloudFormation naming conflicts:
+
+  ```shell
+  cd packages/api
+  sls remove --stage prod
+  ```
+
+  Then re-run the deploy from the project root.
+</Tip>

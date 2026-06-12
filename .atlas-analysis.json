@@ -1,0 +1,85 @@
+{
+  "projectType": "api-service",
+  "projectName": "AWS Lambda PDF Generator",
+  "projectDescription": "A serverless web service that converts HTML documents to PDF files using AWS API Gateway, AWS Lambda, Puppeteer, and Chromium.",
+  "theme": "luma",
+  "primaryColor": "#E84C4C",
+  "lightColor": "#FF7A7A",
+  "darkColor": "#C0392B",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Deployment",
+            "pages": [
+              "deployment/overview",
+              "deployment/configuration",
+              "deployment/testing"
+            ]
+          },
+          {
+            "group": "Concepts",
+            "pages": [
+              "concepts/architecture",
+              "concepts/large-responses",
+              "concepts/limitations"
+            ]
+          },
+          {
+            "group": "Release Notes",
+            "pages": [
+              "releases/changelog"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Endpoints",
+            "pages": [
+              "api/overview",
+              "api/post-print",
+              "api/get-service-version"
+            ]
+          },
+          {
+            "group": "Schemas",
+            "pages": [
+              "api/request-body",
+              "api/responses"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Convert any HTML document to a PDF file via a simple POST request",
+    "Serverless deployment using AWS API Gateway and AWS Lambda",
+    "Powered by Puppeteer and headless Chromium (v122)",
+    "Support for large PDF responses via gzip compression or S3 redirect",
+    "Configurable Puppeteer PDF options (page size, margins, etc.)",
+    "Optional source tagging for request identification and logging",
+    "Lambda Layer architecture for efficient Chromium bundling",
+    "CORS support for browser-based integrations"
+  ],
+  "publicApiSurface": [
+    "POST /print — generate a PDF from an HTML document",
+    "GET /service/version — read service metadata and version",
+    "Request body: html (required string), source (optional string), settings (optional Puppeteer PDF options object)",
+    "Response 200: application/pdf binary",
+    "Response 400: PRINT_FAILED_HTML_MISSING error",
+    "Response 500: REQUEST_GENERAL_FAILURE error"
+  ]
+}

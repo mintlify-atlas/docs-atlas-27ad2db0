@@ -1,0 +1,55 @@
+---
+title: "AWS Lambda PDF Generator: HTML-to-PDF as a Service"
+sidebarTitle: "Introduction"
+description: "AWS Lambda PDF Generator converts HTML documents to PDF files via a REST API. Deploy serverlessly to your AWS account using Puppeteer and Chromium."
+---
+
+AWS Lambda PDF Generator is a serverless web service that accepts an HTML document over a REST API and returns a rendered PDF file — all without managing a single server. Built for developers and teams that need reliable, on-demand PDF generation inside an AWS environment, it deploys entirely within your own AWS account using the Serverless framework, AWS API Gateway, and AWS Lambda. Under the hood, a headless Chromium browser (loaded from a Lambda Layer) renders the HTML with full CSS and JavaScript support before Puppeteer captures the output as a PDF binary.
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Deploy the service and generate your first PDF in under 10 minutes.
+  </Card>
+  <Card title="Deployment" icon="cloud-arrow-up" href="/deployment/overview">
+    Configure stages, regions, and AWS permissions for your deployment.
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/overview">
+    Explore the `/print` endpoint request schema and response formats.
+  </Card>
+  <Card title="Architecture" icon="sitemap" href="/concepts/architecture">
+    Understand how API Gateway, Lambda, and the Chromium Layer work together.
+  </Card>
+</CardGroup>
+
+## How It Works
+
+Every PDF is generated through a single HTTP round-trip. The client sends a `POST` request containing the HTML source to the API Gateway endpoint. API Gateway forwards the request payload to the Lambda function, which parses the JSON body and launches a headless Chromium browser via `@sparticuz/chromium`. Puppeteer loads the HTML into a new browser page, waits for all network activity to settle (`networkidle0`), then calls `page.pdf()` to render the page as a PDF binary. The binary is returned directly in the HTTP response with a `Content-Type: application/pdf` header.
+
+The flow in summary:
+
+1. **Client** — sends `POST /print` with a JSON body containing `html` (required), `source` (optional label), and `settings` (optional Puppeteer PDF options).
+2. **AWS API Gateway** — receives the request, enforces CORS, and proxies the payload to Lambda.
+3. **AWS Lambda** — runs the Node.js 20.x handler, loads Chromium from the attached Lambda Layer, and starts Puppeteer.
+4. **Puppeteer + Chromium** — renders the HTML document fully (including CSS and JavaScript) and generates a PDF binary.
+5. **Response** — the Lambda function returns the PDF binary to API Gateway, which streams it back to the client as `application/pdf`.
+
+For large responses that exceed API Gateway's 10 MB payload limit, the service can offload the PDF to an S3 bucket and return a redirect, allowing very large documents to be retrieved without hitting gateway constraints.
+
+<Note>
+  ARM architecture is not currently supported. The `@sparticuz/chromium` Lambda Layer that provides the headless Chromium binary has not yet released ARM-compatible builds, so the service must be deployed to `x86_64` Lambda functions. Follow the [`@sparticuz/chromium` project](https://github.com/Sparticuz/chromium) for updates on ARM support.
+</Note>
+
+## Technology Stack
+
+The service is built entirely on open-source tooling and managed AWS services:
+
+- **[Serverless Framework](https://www.serverless.com/) v3** — infrastructure-as-code tool that provisions and deploys API Gateway, Lambda, and IAM resources from a single `serverless.yml` configuration.
+- **[AWS API Gateway](https://aws.amazon.com/api-gateway/)** — HTTP endpoint that receives client requests, handles CORS, and proxies events to the Lambda function.
+- **[AWS Lambda](https://aws.amazon.com/lambda/) (Node.js 20.x)** — serverless compute runtime that executes the PDF generation handler with 2,048 MB of memory and a 30-second timeout.
+- **[Puppeteer](https://github.com/puppeteer/puppeteer) v22 (`puppeteer-core` 22.4.0)** — high-level browser automation library used to load HTML content and call `page.pdf()` to produce the PDF output.
+- **[Chromium v122](https://www.chromium.org/) (via AWS Lambda Layer)** — headless browser engine packaged as a Lambda Layer artifact (`chromium-v122.zip`) and mounted at runtime.
+- **[`@sparticuz/chromium`](https://github.com/Sparticuz/chromium) 122.0.0** — Node.js package that provides the correct Chromium executable path, launch arguments, and graphics-mode configuration tuned for the Lambda execution environment.
+
+## License
+
+AWS Lambda PDF Generator is released under the [MIT License](https://github.com/barchart/aws-lambda-pdf-generator). You are free to use, modify, and distribute it in both commercial and non-commercial projects. Source code is available on GitHub at [https://github.com/barchart/aws-lambda-pdf-generator](https://github.com/barchart/aws-lambda-pdf-generator).

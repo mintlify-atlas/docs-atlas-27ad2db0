@@ -1,0 +1,109 @@
+---
+title: "PDF Generator API Response Schemas"
+sidebarTitle: "Responses"
+description: "Response schemas for the AWS Lambda PDF Generator API: successful PDF binary (200), validation errors (400), and server errors (500)."
+---
+
+The `POST /print` endpoint returns one of three HTTP response types. A `200 OK` is returned when PDF generation succeeds, delivering the binary PDF directly in the response body. A `400 Bad Request` is returned when the request is malformed — most commonly because the required `html` field is absent. A `500 Internal Server Error` is returned when Puppeteer or headless Chromium encounters an unexpected failure during rendering. Both error responses share the same JSON envelope shape, making client-side error handling straightforward.
+
+## 200 — Success
+
+When PDF generation succeeds, the API returns the binary PDF file directly in the response body.
+
+- **Content-Type:** `application/pdf`
+- **Body:** Raw binary PDF data
+
+The following example uses `curl` to send a minimal request and save the returned PDF to disk:
+
+```shell
+curl 'https://{api-identifier}.execute-api.us-east-1.amazonaws.com/prod/print' \
+  -X POST \
+  -H 'Content-Type: application/json' \
+  -d '{"html":"<html><body>Hello</body></html>"}' \
+  --output result.pdf
+```
+
+For very large PDFs, the response may take one of two alternate forms depending on the generated file size:
+
+- **Gzip-compressed** — The response body is compressed and includes a `Content-Encoding: gzip` header. Most HTTP clients and libraries decompress this automatically.
+- **S3 redirect** — The response is an HTTP `303 See Other` with a `Location` header pointing to a pre-signed Amazon S3 URL where the PDF can be downloaded. Most HTTP clients follow this redirect automatically.
+
+See [Large Response Handling](#large-response-handling) below for more detail.
+
+## 400 — Bad Request
+
+A `400` response is returned when the request body fails validation. The most common cause is omitting the required `html` field.
+
+- **Content-Type:** `application/json`
+- **Error code:** `PRINT_FAILED_HTML_MISSING`
+
+The response body is a JSON array. Each element in the array represents one failure and contains a `value` object with a machine-readable `code` and a human-readable `message`, plus a `children` array for nested failure details.
+
+<ResponseField name="[].value" type="object">
+  Top-level failure descriptor for this error item.
+
+  <Expandable title="value properties">
+    <ResponseField name="[].value.code" type="string">
+      A machine-readable error code identifying the failure type. Example: `"PRINT_FAILED_HTML_MISSING"`.
+    </ResponseField>
+
+    <ResponseField name="[].value.message" type="string">
+      A human-readable description of the failure.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="[].children" type="array">
+  An array of nested failure objects. Empty for top-level validation errors.
+</ResponseField>
+
+**Example response:**
+
+```json
+[
+  {
+    "value": {
+      "code": "PRINT_FAILED_HTML_MISSING",
+      "message": "Failed to print PDF, no HTML document provided."
+    },
+    "children": []
+  }
+]
+```
+
+## 500 — Internal Server Error
+
+A `500` response is returned when Puppeteer or headless Chromium encounters an error during PDF generation. This may be caused by a malformed HTML document that triggers a renderer crash, an unhandled exception in the Lambda handler, or an infrastructure-level problem.
+
+- **Content-Type:** `application/json`
+- **Error code:** `REQUEST_GENERAL_FAILURE`
+
+The response body follows the same JSON array envelope as the `400` response.
+
+**Example response:**
+
+```json
+[
+  {
+    "value": {
+      "code": "REQUEST_GENERAL_FAILURE",
+      "message": "An attempt to print html page failed for unspecified reason(s)."
+    },
+    "children": []
+  }
+]
+```
+
+<Tip>
+  When a `500` error occurs, the Lambda function logs the full stack trace to Amazon CloudWatch Logs. Navigate to the **Log groups** section of the CloudWatch console, find the log group for your Lambda function (typically `/aws/lambda/{function-name}`), and inspect the most recent log stream to identify the root cause.
+</Tip>
+
+## Large Response Handling
+
+AWS Lambda and API Gateway impose payload size limits that can be exceeded by large generated PDFs. The service handles this transparently using two strategies:
+
+**Gzip compression** — If the PDF can be reduced to an acceptable size through compression, the response is returned inline with a `Content-Encoding: gzip` header. Verify your HTTP client is configured to decompress gzip responses (most are by default).
+
+**S3 pre-signed URL redirect** — If the compressed PDF still exceeds the payload limit, the service uploads the file to Amazon S3 and returns an HTTP `303 See Other` response. The `Location` header contains a time-limited pre-signed S3 URL from which the PDF can be retrieved. Most HTTP clients (including `curl` with `-L` and browser `fetch`) follow `303` redirects automatically.
+
+For deeper background on these two strategies and how to configure them, see [Large Responses](/concepts/large-responses).

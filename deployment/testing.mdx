@@ -1,0 +1,102 @@
+---
+title: "Test the PDF Generator Locally and After Deployment"
+sidebarTitle: "Testing"
+description: "Invoke the PDF Generator Lambda locally with the Serverless CLI, and test the live endpoint with curl after deploying to AWS."
+---
+
+The PDF Generator can be exercised at two distinct stages of the development lifecycle: locally before any AWS resources exist, and against the live deployed endpoint after a successful `yarn deploy:prod` or `yarn deploy:stage`. Local invocation uses the Serverless CLI to simulate the Lambda execution environment on your machine, which is useful for rapid iteration. Post-deployment testing validates the full AWS path — API Gateway, Lambda cold start, Chromium layer, and S3 large-response handling — using plain HTTP clients such as `curl`.
+
+## Local Testing
+
+Local invocation runs the Lambda handler directly on your machine using the Serverless framework's `invoke local` command. No AWS credentials or live infrastructure are needed; the framework resolves environment variables from `serverless.yml` and loads the handler from source.
+
+<Steps>
+  <Step title="Navigate to the API package">
+    All `sls` commands must be run from within the `packages/api` directory, where `serverless.yml` is located:
+
+    ```shell
+    cd ./packages/api
+    ```
+  </Step>
+
+  <Step title="Invoke with the standard test payload">
+    Run the `print` function using the bundled test event file:
+
+    ```shell
+    sls invoke local -f print --path print/test/print.json
+    ```
+
+    The file `print/test/print.json` contains a pre-built API Gateway proxy event. Its `body` field is a base64-encoded JSON string that decodes to:
+
+    ```json
+    {
+      "source": "testing",
+      "html": "<html><body><h1>Hello World</h1><div>You have converted an HTML document into a PDF file.</div></body></html>"
+    }
+    ```
+
+    The `isBase64Encoded: true` flag instructs the handler to decode the body before passing it to Puppeteer, mirroring exactly how API Gateway forwards binary-encoded POST requests.
+  </Step>
+
+  <Step title="Invoke with the 5 MB stress-test payload">
+    To verify that large-payload handling works correctly (including the S3 fallback path for responses that exceed Lambda's 6 MB synchronous response limit), use the 5 MB test fixture:
+
+    ```shell
+    sls invoke local -f print --path print/test/print.5MB.json
+    ```
+
+    This payload contains a significantly larger HTML document and exercises the code path that writes the PDF to S3 and returns a pre-signed URL instead of embedding the binary directly in the Lambda response.
+  </Step>
+</Steps>
+
+## Testing the Deployed Endpoint
+
+After a successful deployment, the Serverless framework prints the base URL of your API Gateway stage to the console. Use that URL to send live HTTP requests.
+
+### Convert HTML to PDF — `POST /print`
+
+Send an HTML document in the request body and save the binary PDF response to a local file:
+
+```shell
+curl 'https://{api-identifier}.execute-api.us-east-1.amazonaws.com/{stage}/print' \
+  -X 'POST' \
+  --output result.pdf \
+  --header 'Content-Type: application/json' \
+  --data-binary '{"source":"testing","html":"<html><body><h1>Hello World</h1><div>You have converted an HTML document into a PDF file.</div></body></html>"}'
+```
+
+The `--output result.pdf` flag writes the raw PDF bytes returned by the service directly to disk. Open `result.pdf` in any PDF viewer to confirm a successful conversion.
+
+### Read service metadata — `GET /service/version`
+
+Verify that the service is reachable and inspect its version metadata:
+
+```shell
+curl 'https://{api-identifier}.execute-api.us-east-1.amazonaws.com/{stage}/service/version'
+```
+
+A successful response returns a JSON object containing the deployed service version.
+
+## Interpreting Results
+
+| HTTP Status | Meaning | Common cause |
+|---|---|---|
+| **200 OK** | PDF generated successfully | The response body is a binary `application/pdf` document |
+| **400 Bad Request** | Request validation failed | The required `html` field is missing or the request body is malformed JSON |
+| **500 Internal Server Error** | Server-side processing error | Chromium failed to launch, Puppeteer encountered a rendering error, or the S3 large-response bucket is unreachable |
+
+<Note>
+  Replace `{api-identifier}` and `{stage}` in the example URLs with the actual values printed by the Serverless framework after deployment. For example, a production endpoint might look like `https://abc123xyz.execute-api.us-east-1.amazonaws.com/prod/print`.
+</Note>
+
+<Tip>
+  If a request returns a 500 error or an unexpected response, check the Lambda function's CloudWatch Log Group for the full stack trace. Logs are retained for 90 days and are located at:
+
+  `/aws/lambda/serverless-pdf-generator-{stage}-print`
+
+  You can tail the logs in real time using the AWS CLI:
+
+  ```shell
+  aws logs tail /aws/lambda/serverless-pdf-generator-{stage}-print --follow
+  ```
+</Tip>

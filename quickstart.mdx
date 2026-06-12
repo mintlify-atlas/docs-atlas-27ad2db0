@@ -1,47 +1,122 @@
 ---
-title: "Quickstart"
-description: "Begin with a guide on the fastest path to a successful outcome"
+title: "Get Started with AWS Lambda PDF Generator"
+sidebarTitle: "Quickstart"
+description: "Deploy the AWS Lambda PDF Generator to your AWS account and convert your first HTML document to a PDF in under 10 minutes."
 ---
 
-Describe how someone begins using your product. What is the first thing they need to do? Are there any prerequisites?
-
-A quickstart should take someone from zero to using your product. They'll get a quick win and a sense of what they can accomplish.
-
-## Prerequisites
-
-Before you begin, you must have:
-
-- Requirement one (for example, Node.js 18+, a free account, an API key)
-- Requirement two (for example, a compatible device, a compatible browser, a compatible operating system)
-
-## Get started
+This guide walks you through everything you need to go from zero to a working PDF generation endpoint. By the end, you will have cloned the repository, deployed the service to your AWS account using the Serverless framework, and used `curl` to convert an HTML snippet into a downloadable PDF file.
 
 <Steps>
-  <Step title="Install">
-    Describe how to install your product or sign up.
 
-    ```bash
-    npm install your-package
-    ```
-  </Step>
-  <Step title="Configure">
-    Describe any setup or configuration needed before first use.
+  <Step title="Prerequisites">
+    Before you begin, make sure the following tools are installed and configured on your machine:
 
-    ```bash
-    your-cli init
-    ```
-  </Step>
-  <Step title="Run it">
-    Show the first thing a user does to see it working.
+    - **AWS account** — [Sign up here](https://portal.aws.amazon.com/billing/signup#/start) if you don't already have one. Your IAM user or role must have sufficient permissions to create API Gateway, Lambda, IAM, S3, and CloudFormation resources.
+    - **AWS CLI** — Install and configure it with your credentials by following the [official instructions](https://docs.aws.amazon.com/cli/latest/userguide/cli-chap-welcome.html). Run `aws sts get-caller-identity` to confirm your credentials are active.
+    - **Node.js** — The Lambda runtime targets Node.js 20.x. We recommend installing and managing Node.js versions with [NVM (Node Version Manager)](https://github.com/nvm-sh/nvm).
+    - **Yarn** — The project uses Yarn as its package manager. Install it by following the [Yarn installation instructions](https://classic.yarnpkg.com/en/docs/install).
+    - **Serverless Framework** — Install it globally by following the [Serverless installation instructions](https://www.serverless.com/framework/docs/providers/aws/guide/installation/). The project requires Serverless Framework v3 (`>=3.38.0 <4.0.0`).
 
-    ```bash
-    your-cli start
-    ```
+    <Tip>
+      If you use NVM, run `nvm install 20 && nvm use 20` to ensure you are on a Node.js 20.x version before proceeding.
+    </Tip>
   </Step>
+
+  <Step title="Clone and Install">
+    Clone the repository from GitHub and install all workspace dependencies from the project root:
+
+    ```shell
+    git clone https://github.com/barchart/aws-lambda-pdf-generator.git
+    cd aws-lambda-pdf-generator
+    yarn install
+    ```
+
+    Yarn uses the workspace configuration defined at the repo root to install dependencies for all packages, including `packages/api`. This step installs `puppeteer-core`, `@sparticuz/chromium`, and all other runtime and build dependencies.
+  </Step>
+
+  <Step title="Deploy to AWS">
+    From the project root directory, run the production deployment command:
+
+    ```shell
+    yarn deploy:prod
+    ```
+
+    This command runs in two phases:
+
+    1. **Build phase** (`make clean && make all`) — Compiles and packages the Chromium v122 binary into the Lambda Layer artifact (`layers/chromium-v122.zip`). This step requires `make` to be available in your shell.
+    2. **Deploy phase** (`serverless deploy --stage prod`) — The Serverless framework provisions all AWS infrastructure defined in `packages/api/serverless.yml`: the `HeadlessChromium` Lambda Layer, the `print` Lambda function (Node.js 20.x, 2,048 MB memory, 30-second timeout), and the API Gateway endpoint.
+
+    When the deployment completes, the CLI output will include your API Gateway base URL. It will look similar to:
+
+    ```
+    endpoints:
+      POST - https://{api-identifier}.execute-api.us-east-1.amazonaws.com/prod/print
+    ```
+
+    Copy this URL — you will use it in the next step.
+
+    <Tip>
+      Your AWS account must have permissions to create and manage Lambda, API Gateway, IAM roles, S3 buckets, and CloudFormation stacks. If the deployment fails with an access error, check your IAM policy.
+    </Tip>
+  </Step>
+
+  <Step title="Convert Your First HTML to PDF">
+    With the service deployed, send your first HTML-to-PDF conversion request using `curl`. Replace `{api-identifier}` with the actual identifier from your deployment output:
+
+    ```shell
+    curl 'https://{api-identifier}.execute-api.us-east-1.amazonaws.com/prod/print' \
+      -X 'POST' \
+      --output my-document.pdf \
+      --header 'Content-Type: application/json' \
+      --data-binary '{"source":"quickstart","html":"<html><body><h1>Hello World</h1><p>Converted from HTML to PDF.</p></body></html>"}'
+    ```
+
+    The request body is a JSON object with three fields:
+
+    | Field | Type | Required | Description |
+    |---|---|---|---|
+    | `html` | `string` | ✅ Yes | The full HTML document to render as a PDF. |
+    | `source` | `string` | No | A label identifying the request origin, used in Lambda logs. |
+    | `settings` | `object` | No | [Puppeteer `page.pdf()` options](https://github.com/puppeteer/puppeteer/blob/v5.2.1/docs/api.md#pagepdfoptions) such as `format`, `width`, `height`, and margins. |
+
+    A successful request returns an `application/pdf` binary response, which `curl` writes directly to `my-document.pdf`.
+
+    <Warning>
+      Replace `{api-identifier}` in the URL with the actual identifier shown in your Serverless deployment output. The stage name in the URL must also match the stage you deployed — this guide uses `prod`.
+    </Warning>
+  </Step>
+
+  <Step title="Verify the Output">
+    Open `my-document.pdf` in any PDF viewer (Preview on macOS, Adobe Reader, your browser, etc.) and confirm the document renders correctly. You should see a page with the heading **Hello World** and the paragraph text **Converted from HTML to PDF.**
+
+    If the file is empty or the command returned an error response, check the following:
+
+    - Confirm the endpoint URL and stage name are correct.
+    - Run `aws sts get-caller-identity` to verify your AWS credentials are still active.
+    - Check the Lambda function logs in the AWS Console under **CloudWatch → Log Groups → `/aws/lambda/serverless-pdf-generator-prod-print`** for detailed error messages.
+
+    <Tip>
+      You can pass any valid HTML string in the `html` field — including inline CSS, external fonts referenced via `<link>`, and self-contained JavaScript. Chromium waits for `networkidle0` before capturing the PDF, so most styles and scripts will be fully applied.
+    </Tip>
+  </Step>
+
 </Steps>
 
-<Tip>
-  Give people a way to get help. This could be a link to a support page, a chat with a customer support agent, or a forum for your product.
+## What's Next
 
-  Example: Need help? Reach out to us at [support@yourcompany.com](mailto:support@yourcompany.com).
-</Tip>
+Now that your service is live, explore the rest of the documentation to configure, extend, and integrate the PDF generator:
+
+<CardGroup cols={2}>
+  <Card title="Configuration" icon="sliders" href="/deployment/configuration">
+    Customize Lambda memory, timeout, CORS settings, and S3 large-response handling.
+  </Card>
+  <Card title="POST /print Reference" icon="file-pdf" href="/api/post-print">
+    Full API reference for the `/print` endpoint including all request parameters and error codes.
+  </Card>
+  <Card title="Architecture" icon="sitemap" href="/concepts/architecture">
+    Deep-dive into how API Gateway, Lambda, the Chromium Layer, and S3 fit together.
+  </Card>
+  <Card title="Large Responses" icon="box-archive" href="/concepts/large-responses">
+    Learn how the service handles PDFs that exceed API Gateway's 10 MB response limit via S3 offloading.
+  </Card>
+</CardGroup>

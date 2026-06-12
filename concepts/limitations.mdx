@@ -1,0 +1,78 @@
+---
+title: "Known Limitations of the PDF Generator Service"
+sidebarTitle: "Limitations"
+description: "Understand the constraints of the AWS Lambda PDF Generator: HTML input size, PDF generation time limits, architecture support, and network access."
+---
+
+The AWS Lambda PDF Generator is intentionally simple — it trades configurability and scale for ease of deployment and zero server management. That simplicity comes with constraints inherited from AWS API Gateway, Lambda, and the Chromium layer. This page describes the current limitations developers should plan around when integrating the service.
+
+## Constraints
+
+<AccordionGroup>
+  <Accordion title="HTML Input Size — 10 MB maximum">
+    AWS API Gateway enforces a hard **10 MB maximum** on all incoming request bodies. HTML documents larger than this threshold are rejected by API Gateway before the Lambda function is ever invoked; the caller receives a `413 Request Entity Too Large` response.
+
+    This limit applies to the raw JSON body of the `POST /print` request, which includes the `html` string, the `source` label, and any `settings` object. In practice, the effective maximum size of the HTML content itself is slightly below 10 MB once JSON encoding overhead is accounted for.
+  </Accordion>
+
+  <Accordion title="Processing Time — 30 seconds maximum">
+    The `print` Lambda function has a **30-second timeout**. The clock starts when Lambda begins executing — which includes the time needed to:
+
+    - Cold-start the Node.js runtime and load the function bundle.
+    - Extract and initialize the Chromium binary from the Lambda Layer.
+    - Launch the headless browser process.
+    - Load and render the HTML (`waitUntil: 'networkidle0'`).
+    - Export the rendered page as a PDF.
+
+    If the total processing time exceeds 30 seconds, Lambda terminates the function and API Gateway returns a `504 Gateway Timeout` error. Very complex HTML documents, pages with many embedded resources, or environments with slow cold-start times are most at risk of hitting this limit.
+  </Accordion>
+
+  <Accordion title="No ARM architecture support">
+    All Lambda functions are deployed on **x86_64** only. The [`@sparticuz/chromium`](https://github.com/Sparticuz/chromium) package does not yet publish an ARM-compatible Lambda Layer, which means:
+
+    - The service cannot run on `arm64` Lambda instances (which offer better price-performance on AWS).
+    - Local development on Apple Silicon (M1/M2/M3) Macs requires an x86_64 emulation workaround; native ARM execution is not supported.
+
+    This limitation is tracked upstream. Once `@sparticuz/chromium` adds ARM support, the `serverless.yml` architecture setting and the layer artifact can be updated accordingly.
+  </Accordion>
+
+  <Accordion title="No external network access during rendering">
+    Puppeteer loads the HTML document using `page.setContent()`, not `page.goto()`. This means the browser does not make an HTTP request to fetch the page — it receives the HTML string directly. As a result, the browser has **no implicit base URL** for resolving relative references.
+
+    External resources declared in the HTML — such as images via `src="https://..."`, stylesheets via `<link href="...">`, or web fonts via `@font-face` — will only load if:
+
+    1. The Lambda function has **outbound internet access** configured (i.e., it is deployed inside a VPC with a NAT Gateway, or with no VPC restriction that blocks egress).
+    2. The referenced URLs are publicly reachable at render time.
+
+    By default, Lambda functions have outbound internet access unless explicitly placed in a restricted VPC. However, latency for external resource fetches counts against the 30-second timeout, and any unreachable resource will stall `waitUntil: 'networkidle0'` until its request times out.
+  </Accordion>
+
+  <Accordion title="Single endpoint — no batch support">
+    The service exposes exactly **one PDF generation endpoint**: `POST /print`. There is no batch endpoint for generating multiple PDFs in a single request. Each PDF requires its own HTTP request, Lambda invocation, and Chromium launch cycle.
+
+    For workloads that need to generate many PDFs in parallel, callers must issue multiple concurrent requests and manage concurrency on the client side. AWS Lambda will scale horizontally to handle concurrent requests, but each invocation pays the full cold-start and Chromium launch cost independently.
+  </Accordion>
+</AccordionGroup>
+
+## Workarounds
+
+The following strategies can help work within these constraints for common scenarios:
+
+**For large HTML documents (approaching the 10 MB limit):**
+- Split the document into multiple smaller HTML pages and generate one PDF per section, then merge them client-side.
+- Compress or minify the HTML before sending — remove unnecessary whitespace, comments, and redundant attributes.
+- Move large inline data (such as base64 images) to external URLs if the Lambda environment has internet access, reducing the request body size.
+
+**For timeout issues (complex documents approaching 30 seconds):**
+- Simplify the HTML structure and reduce the number of DOM elements.
+- Inline all images as base64 data URIs (e.g., `<img src="data:image/png;base64,...">`) to eliminate outbound fetch latency during rendering.
+- Remove or defer JavaScript execution within the HTML, since `waitUntil: 'networkidle0'` waits for all script-triggered network activity to settle.
+- Pre-render dynamic content server-side and send fully resolved static HTML to the service.
+
+**For external images and fonts:**
+- Inline images as base64 data URIs directly in the `html` string. This is the most reliable approach and eliminates any dependency on outbound network access.
+- Self-host fonts and convert them to base64 data URIs embedded in a `<style>` block, rather than referencing external font providers such as Google Fonts.
+
+<Note>
+  Overcoming the 10 MB request-size limit and the 30-second processing limit in a general-purpose way would require additional engineering — for example, accepting HTML via S3 pre-signed URLs instead of the request body, or switching to asynchronous Lambda invocation via an SQS queue so that generation is decoupled from the HTTP request/response cycle. There is no current plan to implement these enhancements in the core service.
+</Note>

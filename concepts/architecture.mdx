@@ -1,0 +1,161 @@
+---
+title: "Architecture of the Serverless PDF Generator"
+sidebarTitle: "Architecture"
+description: "How AWS Lambda PDF Generator works: API Gateway routes requests to Lambda, which launches Puppeteer and headless Chromium to render HTML as a PDF."
+---
+
+The AWS Lambda PDF Generator is a fully serverless web service built on AWS infrastructure. A client sends an HTTP `POST` request carrying an HTML document to an API Gateway endpoint. API Gateway forwards the request to a Lambda function, which launches headless Chromium via Puppeteer, renders the HTML, and streams the resulting PDF binary back to the caller — all without any persistent servers or containers to manage.
+
+## Request Lifecycle
+
+<Steps>
+  <Step title="Client sends POST /print">
+    The client issues an HTTP `POST` to `/print` with a JSON body containing up to three fields:
+
+    ```json
+    {
+      "html": "<html><body><h1>Hello World</h1></body></html>",
+      "source": "my-report",
+      "settings": { "format": "A4", "printBackground": true }
+    }
+    ```
+
+    `html` is required. `source` is an optional label used for logging. `settings` is an optional object of [Puppeteer PDF options](https://pptr.dev/api/puppeteer.pdfoptions).
+  </Step>
+
+  <Step title="API Gateway receives and encodes the request">
+    AWS API Gateway accepts the incoming request, base64-encodes the raw body using the `serverless-apigw-binary` plugin (configured for all `*/*` content types), and invokes the Lambda function synchronously, passing the encoded payload as the `event` object.
+  </Step>
+
+  <Step title="Lambda decodes the body and validates input">
+    The `print` handler calls `LambdaHelper.process`, which parses the incoming `event`. The body is decoded from base64 and parsed as JSON:
+
+    ```js
+    const body = JSON.parse(Buffer.from(parser.getBody(), 'base64').toString());
+
+    const source   = body.source   || null;
+    const html     = body.html     || null;
+    const settings = body.settings || null;
+
+    if (html === null) {
+      return Promise.reject(FailureReason.from(PrinterFailureTypes.PRINT_FAILED_HTML_MISSING));
+    }
+    ```
+
+    If `html` is absent, the function rejects immediately with a structured failure reason before any browser is launched.
+  </Step>
+
+  <Step title="Lambda launches headless Chromium via Puppeteer">
+    With a valid `html` payload in hand, Lambda starts the browser using the `@sparticuz/chromium` package bundled in the `HeadlessChromium` Lambda Layer:
+
+    ```js
+    chromium.setGraphicsMode = false;
+
+    context.browser = await puppeteer.launch({
+      args: chromium.args,
+      executablePath: await chromium.executablePath(),
+      headless: chromium.headless,
+      ignoreHTTPSErrors: true
+    });
+    ```
+
+    `chromium.args` supplies the minimal set of Chromium flags required for a sandboxed Lambda environment. `chromium.executablePath()` resolves to the layer-provided binary. Graphics mode is disabled to reduce memory overhead.
+  </Step>
+
+  <Step title="Puppeteer renders HTML and generates PDF">
+    A new browser page is created, the HTML content is loaded, and Puppeteer exports the page as a PDF:
+
+    ```js
+    await page.setContent(html, { waitUntil: 'networkidle0' });
+
+    context.pdf = await page.pdf(settings || {});
+    ```
+
+    `waitUntil: 'networkidle0'` pauses rendering until all network connections are idle, ensuring that any inline scripts or assets that trigger sub-requests have finished before the PDF snapshot is taken.
+  </Step>
+
+  <Step title="Lambda closes the browser and returns the PDF">
+    The browser is closed unconditionally in the `finally` block to release memory. The PDF binary is then handed to the response pipeline:
+
+    ```js
+    return responder
+      .setHeader('Content-Type', 'application/pdf')
+      .send(context.pdf);
+    ```
+
+    The `responder` runs the PDF through `LambdaResponseGeneratorGzip` first. If the compressed payload still exceeds the API Gateway limit, `LambdaResponseGeneratorS3` uploads the PDF to S3 and replies with an HTTP 303 redirect. See [Large Responses](/concepts/large-responses) for details.
+  </Step>
+</Steps>
+
+## Lambda Layer
+
+The `HeadlessChromium` Lambda Layer packages Chromium v122 — provided by the [`@sparticuz/chromium`](https://github.com/Sparticuz/chromium) project — as a separate deployment artifact (`layers/chromium-v122.zip`). Splitting Chromium into its own layer keeps the Lambda function's deployment package small (only application code and Node.js dependencies), which speeds up cold-start times and simplifies deployments. It also means that the Chromium binary can be updated independently of the function logic — a new layer version can be published and attached without touching `print.js`.
+
+```yaml
+layers:
+  HeadlessChromium:
+    name: serverless-headless-chromium-${self:custom.stage}-v122
+    description: Layer for puppeteer to launch headless Chromium v122
+    compatibleRuntimes:
+      - nodejs20.x
+    package:
+      artifact: layers/chromium-v122.zip
+```
+
+<Note>
+  ARM architecture is not currently supported. The `@sparticuz/chromium` project does not yet publish an ARM-compatible Lambda Layer, which means the function cannot run on `arm64` Lambda instances. For the same reason, local testing on Apple Silicon requires additional workarounds. See the [Limitations](/concepts/limitations) page for more context.
+</Note>
+
+## Functions
+
+The service deploys two Lambda functions, each with a distinct purpose and resource profile.
+
+| Function | Handler | Purpose | Memory | Timeout | Layer |
+|---|---|---|---|---|---|
+| `print` | `print/print.handler` | Generates a PDF from an HTML document | 2048 MB | 30 s | `HeadlessChromium` |
+| `serviceRead` | `service/version.handler` | Returns service metadata (name, description, version, environment) | Default | Default | None |
+
+The `print` function is allocated 2048 MB of RAM because Chromium's rendering engine is memory-intensive. The 30-second timeout matches the maximum synchronous response window allowed by API Gateway. The `serviceRead` function is lightweight and carries no layer dependency — it simply reads from `package.json` at startup and returns a JSON object:
+
+```js
+return {
+  service: {
+    name: packageJson.name,
+    description: packageJson.description,
+    environment: process.env.NODE_ENV,
+    version: packageJson.version
+  }
+};
+```
+
+## Runtime
+
+All Lambda functions run on **Node.js 20.x** (`nodejs20.x`) on the **x86_64** architecture. The runtime was updated from Node.js 18.x in v3.0.1 to track the current AWS Lambda managed runtime.
+
+<Note>
+  ARM (`arm64`) execution is not supported at this time. The `@sparticuz/chromium` package does not yet provide an ARM-compatible Lambda Layer. Until upstream support is added, the service must remain on `x86_64`.
+</Note>
+
+## CORS
+
+CORS is enabled on all endpoints using a wildcard origin (`*`), allowing browser-based clients to call the service directly without a same-origin proxy. The following request headers are explicitly allowed:
+
+```yaml
+cors:
+  origin: '*'
+  headers:
+    - Accept-Encoding
+    - Content-Type
+    - Content-Length
+    - X-Amz-Date
+    - Authorization
+    - X-Api-Key
+    - X-Amz-Security-Token
+    - X-Amz-User-Agent
+    - Access-Control-Allow-Origin
+    - Access-Control-Allow-Headers
+    - Access-Control-Allow-Methods
+  allowCredentials: false
+```
+
+`allowCredentials` is set to `false` because credentialed cross-origin requests are incompatible with a wildcard origin in the browser security model. If your integration requires cookies or `Authorization` headers from a specific domain, you will need to replace the wildcard with an explicit origin and set `allowCredentials: true`.

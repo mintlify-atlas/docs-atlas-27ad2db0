@@ -1,0 +1,68 @@
+---
+title: "PDF Generator API Reference Overview"
+sidebarTitle: "Overview"
+description: "Overview of the AWS Lambda PDF Generator REST API: two endpoints for PDF generation and service metadata, with JSON request bodies and binary PDF responses."
+---
+
+The AWS Lambda PDF Generator exposes a lightweight REST API deployed via AWS API Gateway. Every HTTP request is handled by an AWS Lambda function that loads Puppeteer and headless Chromium to convert HTML documents into binary PDF files. The API surface is intentionally minimal: one endpoint renders PDFs and a second returns service metadata. No built-in authentication is required to call the service within your own AWS account, though standard API Gateway security mechanisms can be layered on top at any time.
+
+## Base URL
+
+All endpoints share the following base URL pattern:
+
+```
+https://{api-identifier}.execute-api.{region}.amazonaws.com/{stage}
+```
+
+| Placeholder | Description |
+|---|---|
+| `{api-identifier}` | Unique identifier assigned by AWS when you deploy the stack |
+| `{region}` | AWS region where the service is deployed; defaults to `us-east-1` |
+| `{stage}` | Deployment stage name; either `stage` or `prod` |
+
+## Endpoints
+
+<CardGroup cols={2}>
+  <Card title="POST /print" icon="file-pdf" href="/api/post-print">
+    Generate a PDF from an HTML document
+  </Card>
+  <Card title="GET /service/version" icon="circle-info" href="/api/get-service-version">
+    Read service metadata and version
+  </Card>
+</CardGroup>
+
+## Authentication
+
+The PDF Generator does not ship with built-in authentication. By default, the endpoint deployed to AWS API Gateway is publicly accessible to anyone who knows the URL. AWS API Gateway natively supports several security mechanisms that can be configured independently of this service:
+
+- **IAM authorization** — restrict access to callers with valid AWS credentials and the correct IAM policy.
+- **API keys** — issue API keys through API Gateway and require them on every request.
+- **Custom authorizers (Lambda authorizers)** — attach a Lambda function that validates tokens or other credentials before the request reaches the print handler.
+
+Refer to the [AWS API Gateway documentation](https://docs.aws.amazon.com/apigateway/latest/developerguide/apigateway-control-access-to-api.html) for guidance on enabling any of these options after deployment.
+
+## Content Types
+
+| Direction | Content-Type |
+|---|---|
+| Request body | `application/json` |
+| Successful response | `application/pdf` (binary) |
+| Error response | `application/json` |
+
+## Error Format
+
+When a request cannot be fulfilled, the API returns an `application/json` array. Each element contains a `value` object with a machine-readable `code` and a human-readable `message`, plus a `children` array reserved for nested error detail:
+
+```json
+[
+  {
+    "value": {
+      "code": "PRINT_FAILED_HTML_MISSING",
+      "message": "Failed to print PDF, no HTML document provided."
+    },
+    "children": []
+  }
+]
+```
+
+The `code` field is the authoritative identifier for the error condition and is safe to use in programmatic error handling. See [Request Body](/api/request-body) and [Responses](/api/responses) for full schema details.

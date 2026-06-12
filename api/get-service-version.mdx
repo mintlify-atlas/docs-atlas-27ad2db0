@@ -1,0 +1,63 @@
+---
+title: "GET /service/version — Read Service Metadata"
+sidebarTitle: "GET /service/version"
+description: "GET /service/version returns the service name, description, deployed environment (stage/prod), and current version of the AWS Lambda PDF Generator."
+---
+
+The `GET /service/version` endpoint returns a JSON object containing metadata about the running service instance. The response includes the package name and description sourced from `package.json`, the current deployment environment derived from the `NODE_ENV` Lambda environment variable (set automatically by the Serverless Framework to `stage` or `prod` at deploy time), and the current semantic version of the service. No request body or query parameters are required.
+
+## Request
+
+**Method:** `GET`  
+**Path:** `/service/version`
+
+This endpoint requires no request body, query parameters, or authentication headers beyond whatever API Gateway authorization you have configured for your deployment.
+
+## Example Request
+
+```shell
+curl 'https://{api-identifier}.execute-api.us-east-1.amazonaws.com/prod/service/version'
+```
+
+## Response
+
+**`200 OK`** — `application/json`
+
+```json
+{
+  "service": {
+    "name": "@barchart/serverless-pdf-generator",
+    "description": "Web service for conversion of HTML to PDF",
+    "environment": "prod",
+    "version": "3.0.1"
+  }
+}
+```
+
+## Response Fields
+
+<ResponseField name="service" type="object" required>
+  Top-level container for all service metadata fields.
+
+  <Expandable title="service fields">
+    <ResponseField name="service.name" type="string">
+      The package name from `package.json`. Identifies the service in monitoring tools and log aggregation systems. Example: `@barchart/serverless-pdf-generator`.
+    </ResponseField>
+
+    <ResponseField name="service.description" type="string">
+      The human-readable package description from `package.json`. Example: `Web service for conversion of HTML to PDF`.
+    </ResponseField>
+
+    <ResponseField name="service.environment" type="string">
+      The deployment stage, sourced from the `NODE_ENV` Lambda environment variable. Set automatically by the Serverless Framework at deploy time. Expected values: `stage` or `prod`.
+    </ResponseField>
+
+    <ResponseField name="service.version" type="string">
+      The current semantic version of the service, sourced from `package.json`. Follows the `MAJOR.MINOR.PATCH` format. Example: `3.0.1`.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<Tip>
+  Call `GET /service/version` immediately after deploying to verify that the service is reachable and that the `environment` and `version` fields match what you intended to deploy. A successful `200` response with the correct values is a reliable smoke test before routing production traffic to a new deployment.
+</Tip>

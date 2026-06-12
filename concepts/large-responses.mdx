@@ -1,0 +1,108 @@
+---
+title: "Handling Large PDF Responses from Lambda"
+sidebarTitle: "Large Responses"
+description: "Learn how AWS Lambda PDF Generator handles PDFs larger than the API Gateway 10 MB limit using gzip compression and S3 HTTP 303 redirects."
+---
+
+AWS API Gateway enforces a hard maximum response payload size of 10 MB, and Lambda's own synchronous response limit is 6 MB. Either constraint can be breached when generating PDFs from complex or image-heavy HTML documents. Rather than returning an error, the AWS Lambda PDF Generator handles oversized responses automatically by applying gzip compression first, and falling back to an S3-hosted redirect if compression alone is not sufficient. This two-stage pipeline was introduced in v2.0.0.
+
+<Note>
+  Automatic large-response handling was introduced in **v2.0.0**. Earlier versions returned an error for any PDF exceeding the API Gateway payload limit.
+</Note>
+
+## Response Strategies
+
+The `print` handler registers two response generators before any rendering begins:
+
+```js
+responder.addResponseGenerators([
+  new LambdaResponseGeneratorGzip(parser),
+  new LambdaResponseGeneratorS3()
+]);
+```
+
+The generators are tried in order. If the first strategy produces a payload small enough to pass through API Gateway, the pipeline stops there. If not, the second strategy takes over.
+
+### Gzip Compression
+
+`LambdaResponseGeneratorGzip` compresses the PDF binary using gzip before Lambda returns it to API Gateway. For typical HTML-derived PDFs — which contain largely repetitive structured data — compression ratios of 50–80 % are common, frequently bringing a borderline-large PDF well inside the 6 MB Lambda response limit.
+
+The compressed response is returned with the standard `Content-Encoding: gzip` header. Clients that send an `Accept-Encoding: gzip` request header will receive and automatically decompress the response. Most HTTP libraries and browsers handle this transparently.
+
+### S3 Redirect
+
+`LambdaResponseGeneratorS3` is the fallback for PDFs that remain too large after compression. When triggered, the generator:
+
+1. Uploads the PDF binary to a configured S3 bucket using `s3:PutObject`.
+2. Generates a pre-signed S3 URL that grants temporary read access to the object.
+3. Returns an **HTTP 303 See Other** response to the caller with the pre-signed URL in the `Location` header.
+
+The client then follows the redirect and downloads the PDF directly from S3, entirely bypassing the API Gateway payload limit.
+
+```
+HTTP/1.1 303 See Other
+Location: https://s3.amazonaws.com/barchart-aws-lambda-responses/...?X-Amz-Signature=...
+```
+
+<Warning>
+  The S3 bucket must exist and be accessible to the Lambda execution role **before** deployment. If the bucket is missing or the IAM role lacks `s3:PutObject` permission, any request that triggers the S3 fallback will result in a 500 error.
+</Warning>
+
+## S3 Bucket Configuration
+
+The S3 bucket used by `LambdaResponseGeneratorS3` is controlled by two environment variables set in `serverless.yml`:
+
+| Environment Variable | Default Value | Description |
+|---|---|---|
+| `S3_LARGE_HTTP_RESPONSE_REGION` | `us-east-1` | AWS region where the S3 bucket resides |
+| `S3_LARGE_HTTP_RESPONSE_BUCKET` | `barchart-aws-lambda-responses` | Name of the S3 bucket used to store oversized PDFs |
+
+```yaml
+environment:
+  S3_LARGE_HTTP_RESPONSE_REGION: us-east-1
+  S3_LARGE_HTTP_RESPONSE_BUCKET: barchart-aws-lambda-responses
+```
+
+The Lambda execution role is granted the minimum permissions necessary to support both reading and writing objects in this bucket:
+
+```yaml
+iam:
+  role:
+    statements:
+      - Effect: Allow
+        Action:
+          - s3:GetObject
+          - s3:PutObject
+        Resource: arn:aws:s3:::barchart-aws-lambda-responses/*
+```
+
+To use a different bucket or region — for example to keep data within a specific AWS region for compliance — update the `custom.s3` block in `serverless.yml` and redeploy:
+
+```yaml
+custom:
+  s3:
+    responseRegion: 'eu-west-1'
+    responseBucket: 'my-org-lambda-responses'
+```
+
+## Client Requirements
+
+For the best results, HTTP clients calling the `/print` endpoint should be configured as follows:
+
+- **Send `Accept-Encoding: gzip`** — this signals to the service that the client can handle a gzip-compressed response body, enabling the first (and cheaper) large-response strategy. Most modern HTTP clients include this header by default.
+- **Follow HTTP 3xx redirects automatically** — if the S3 fallback is triggered, the service returns an HTTP 303. Clients must follow the redirect to retrieve the PDF from S3. The vast majority of HTTP client libraries (including `curl`, `axios`, `fetch` in browsers, and the AWS SDK) follow redirects automatically; no special configuration is usually needed.
+
+Below is an example `curl` command that satisfies both requirements:
+
+```shell
+curl 'https://{api-id}.execute-api.us-east-1.amazonaws.com/{stage}/print' \
+  -X POST \
+  -H 'Accept-Encoding: gzip' \
+  -H 'Content-Type: application/json' \
+  --compressed \
+  --location \
+  --output result.pdf \
+  --data-binary '{"source":"example","html":"<html><body><h1>Hello</h1></body></html>"}'
+```
+
+`--compressed` instructs `curl` to decompress a gzip response automatically. `--location` enables redirect following for the S3 fallback.

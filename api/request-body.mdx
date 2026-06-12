@@ -1,0 +1,83 @@
+---
+title: "PDF Generation Request Body Schema"
+sidebarTitle: "Request Body"
+description: "Full schema for the POST /print request body: required html field, optional source identifier, and optional Puppeteer page.pdf() settings object."
+---
+
+The `POST /print` endpoint accepts a JSON request body with three top-level fields. Only `html` is required — the complete HTML document you want converted to a PDF. The optional `source` field attaches a label to Lambda log output for tracing, and the optional `settings` object is forwarded verbatim to Puppeteer's `page.pdf()` method, giving you full control over paper size, margins, orientation, and more.
+
+## Schema
+
+<ParamField body="html" type="string" required>
+  The complete HTML document to convert to a PDF. Must be a valid HTML string. Supports inline CSS, embedded JavaScript (though scripts do not execute during Puppeteer rendering by default), and standard HTML5 elements. Maximum size is bounded by API Gateway's 10 MB request limit.
+</ParamField>
+
+<ParamField body="source" type="string">
+  An optional identifier for the request. Used in Lambda log output to correlate log entries with a particular request origin. Has no effect on the generated PDF itself.
+
+  Example values: `"annual-report"`, `"invoice-12345"`, `"crude-oil-price-report"`.
+</ParamField>
+
+<ParamField body="settings" type="object">
+  An options object passed directly to Puppeteer's `page.pdf()` method. If omitted, Puppeteer defaults are used (Letter format, no background printing, 1× scale). See the [Puppeteer `settings` Reference](#puppeteer-settings-reference) below for the most commonly used fields.
+</ParamField>
+
+## Full Example
+
+The following request generates a styled A4 PDF with background colors, custom margins, and a `source` label for log correlation.
+
+```json
+{
+  "source": "quarterly-report",
+  "html": "<html><head><style>body { font-family: Arial, sans-serif; margin: 40px; } h1 { color: #333; }</style></head><body><h1>Q4 2024 Report</h1><p>Revenue: $1.2M</p></body></html>",
+  "settings": {
+    "format": "A4",
+    "landscape": false,
+    "printBackground": true,
+    "margin": {
+      "top": "2cm",
+      "bottom": "2cm",
+      "left": "2cm",
+      "right": "2cm"
+    }
+  }
+}
+```
+
+## Minimal Example
+
+Only the required `html` field is needed. Puppeteer defaults (US Letter, portrait, no background) are applied when `settings` is omitted.
+
+```json
+{
+  "html": "<html><body><h1>Hello, PDF!</h1></body></html>"
+}
+```
+
+## Puppeteer `settings` Reference
+
+The `settings` object is passed verbatim to Puppeteer's `page.pdf()` call inside the Lambda handler. Every key-value pair you provide here maps directly to a Puppeteer PDF option. The table below covers the most commonly used properties.
+
+| Property | Type | Description |
+|---|---|---|
+| `format` | string | Paper format: `Letter`, `Legal`, `Tabloid`, `Ledger`, `A0`–`A6` |
+| `width` | string \| number | Page width, e.g. `"210mm"` (overrides `format`) |
+| `height` | string \| number | Page height, e.g. `"297mm"` (overrides `format`) |
+| `landscape` | boolean | Landscape orientation (default: `false`) |
+| `printBackground` | boolean | Print CSS background colors/images (default: `false`) |
+| `scale` | number | Scale factor 0.1–2 (default: `1`) |
+| `margin.top` | string | Top margin, e.g. `"1cm"`, `"10px"` |
+| `margin.bottom` | string | Bottom margin |
+| `margin.left` | string | Left margin |
+| `margin.right` | string | Right margin |
+| `displayHeaderFooter` | boolean | Display header/footer template (default: `false`) |
+| `headerTemplate` | string | HTML template for the print header |
+| `footerTemplate` | string | HTML template for the print footer |
+
+<Note>
+  The full list of supported options is defined by [Puppeteer's PdfOptions](https://pptr.dev/api/puppeteer.pdfoptions). The service passes the `settings` object verbatim to `page.pdf()`, so all Puppeteer v22 options are supported.
+</Note>
+
+<Warning>
+  Puppeteer waits for `networkidle0` before printing — meaning it waits until there are no more than 0 active network connections for at least 500 ms. If your HTML references external resources such as images, fonts, or stylesheets, ensure those assets are reachable from the Lambda function's network context. If they are not, either host them in a VPC-accessible location or inline them as base64 data URIs directly in your HTML.
+</Warning>

@@ -1,0 +1,158 @@
+---
+title: "Configure the Serverless PDF Generator Stack"
+sidebarTitle: "Configuration"
+description: "Customize the AWS Lambda PDF Generator deployment: Lambda memory, timeout, S3 bucket for large responses, CORS settings, and Node.js runtime."
+---
+
+All deployment configuration lives in a single file: `packages/api/serverless.yml`. This YAML file drives the Serverless framework and controls everything from Lambda memory allocation and timeouts, to environment variables, CORS headers, and the S3 bucket used for large HTTP responses. Edit this file before running `yarn deploy:prod` or `yarn deploy:stage` to tailor the stack to your environment.
+
+## Lambda Function Settings
+
+The stack defines two Lambda functions. The resource-intensive `print` function is tuned for Chromium workloads; the `serviceRead` function uses Serverless framework defaults.
+
+| Setting | `print` function | `serviceRead` function |
+|---|---|---|
+| **Runtime** | `nodejs20.x` | `nodejs20.x` |
+| **Memory** | 2048 MB | Default (128 MB) |
+| **Timeout** | 30 seconds | Default (6 seconds) |
+| **CloudWatch log retention** | 90 days | 90 days |
+
+<Note>
+  The 30-second timeout on the `print` function mirrors the maximum integration timeout enforced by API Gateway. Increasing it beyond 30 seconds in `serverless.yml` will not extend the effective limit for synchronous HTTP requests.
+</Note>
+
+## Environment Variables
+
+The following environment variables are injected into every Lambda function at deploy time. They are defined under `provider.environment` in `serverless.yml` and can be overridden per function if needed.
+
+| Variable | Default value | Description |
+|---|---|---|
+| `NODE_ENV` | `stage` or `prod` | Set to the Serverless stage name. Use this to branch application logic between environments. |
+| `S3_LARGE_HTTP_RESPONSE_REGION` | `us-east-1` | AWS region of the S3 bucket used to store oversized Lambda responses. |
+| `S3_LARGE_HTTP_RESPONSE_BUCKET` | `barchart-aws-lambda-responses` | Name of the S3 bucket used for large HTTP responses that exceed API Gateway's 10 MB payload limit. |
+
+## CORS Configuration
+
+CORS is enabled globally for all endpoints. The default policy allows requests from any origin and accepts the following headers:
+
+- `Accept-Encoding`
+- `Content-Type`
+- `Content-Length`
+- `X-Amz-Date`
+- `Authorization`
+- `X-Api-Key`
+- `X-Amz-Security-Token`
+- `X-Amz-User-Agent`
+- `Access-Control-Allow-Origin`
+- `Access-Control-Allow-Headers`
+- `Access-Control-Allow-Methods`
+
+`allowCredentials` is set to `false`. To restrict the allowed origin to a specific domain, change the `cors.origin` value under `custom` in `serverless.yml`.
+
+## Lambda Layer
+
+The `HeadlessChromium` layer packages Chromium v122 and is built locally before every deployment by the `predeploy` script (`make clean && make all`). The Makefile clones the [`@sparticuz/chromium`](https://github.com/Sparticuz/chromium) repository at tag `v122.0.0`, compiles it, and writes the output to `layers/chromium-v122.zip`.
+
+| Property | Value |
+|---|---|
+| **Layer name** | `serverless-headless-chromium-{stage}-v122` |
+| **Compatible runtimes** | `nodejs20.x` |
+| **Artifact path** | `packages/api/layers/chromium-v122.zip` |
+| **Attached to** | `print` function only |
+
+The `serviceRead` function does not attach this layer because it never invokes Chromium.
+
+## Deployment Bucket
+
+The Serverless framework uploads deployment artifacts (CloudFormation templates, zipped function code, and the Chromium layer) to an S3 bucket before applying the stack. The default bucket is `barchart-serverless-deployments`, configured under `provider.deploymentBucket`.
+
+**Change this to a bucket you own before deploying to your own AWS account.**
+
+<Warning>
+  The S3 bucket specified in `S3_LARGE_HTTP_RESPONSE_BUCKET` (`barchart-aws-lambda-responses` by default) must already exist in the target region before deployment. The Serverless framework will not create this bucket automatically, and Lambda invocations that produce large responses will fail at runtime if the bucket is missing. Create the bucket manually in the AWS Console or via the AWS CLI before running `yarn deploy:prod`.
+</Warning>
+
+## `serverless.yml` Reference
+
+The following snippet shows the full configuration section of `packages/api/serverless.yml`:
+
+```yaml
+service: serverless-pdf-generator
+
+frameworkVersion: ">=3.38.0 <4.0.0"
+
+custom:
+  stage: ${opt:stage, 'stage'}
+
+  s3:
+    responseRegion: 'us-east-1'
+    responseBucket: 'barchart-aws-lambda-responses'
+
+  cors:
+    origin: '*'
+    headers:
+      - Accept-Encoding
+      - Content-Type
+      - Content-Length
+      - X-Amz-Date
+      - Authorization
+      - X-Api-Key
+      - X-Amz-Security-Token
+      - X-Amz-User-Agent
+      - Access-Control-Allow-Origin
+      - Access-Control-Allow-Headers
+      - Access-Control-Allow-Methods
+    allowCredentials: false
+
+provider:
+  name: aws
+  runtime: nodejs20.x
+  logRetentionInDays: 90
+  deploymentBucket: barchart-serverless-deployments
+
+  environment:
+    NODE_ENV: ${self:custom.stage}
+    S3_LARGE_HTTP_RESPONSE_REGION: ${self:custom.s3.responseRegion}
+    S3_LARGE_HTTP_RESPONSE_BUCKET: ${self:custom.s3.responseBucket}
+
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - s3:GetObject
+            - s3:PutObject
+          Resource: arn:aws:s3:::${self:custom.s3.responseBucket}/*
+
+layers:
+  HeadlessChromium:
+    name: serverless-headless-chromium-${self:custom.stage}-v122
+    description: Layer for puppeteer to launch headless Chromium v122
+    compatibleRuntimes:
+      - nodejs20.x
+    package:
+      artifact: layers/chromium-v122.zip
+
+functions:
+  print:
+    handler: print/print.handler
+    description: Generates a PDF from HTML (using Chromium v122)
+    memorySize: 2048
+    timeout: 30
+    layers:
+      - { Ref: HeadlessChromiumLambdaLayer }
+    events:
+      - http:
+          path: /print
+          method: POST
+          cors: ${self:custom.cors}
+
+  serviceRead:
+    handler: service/version.handler
+    description: Reads service metadata
+    events:
+      - http:
+          method: GET
+          path: service/version
+          cors: ${self:custom.cors}
+```

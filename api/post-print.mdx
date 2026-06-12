@@ -1,0 +1,121 @@
+---
+title: "POST /print — Generate a PDF from HTML"
+sidebarTitle: "POST /print"
+description: "POST /print accepts an HTML string and optional Puppeteer settings, renders the page with headless Chromium, and returns an application/pdf binary."
+---
+
+The `POST /print` endpoint is the core of the PDF Generator service. It accepts a JSON request body containing a complete HTML document, renders that document inside a headless Chromium browser using Puppeteer, and streams the resulting PDF back to the caller as a binary `application/pdf` response. An optional `settings` object lets you control paper size, margins, orientation, and other Puppeteer PDF options without changing any server-side configuration.
+
+## Request
+
+**Method:** `POST`  
+**Path:** `/print`  
+**Content-Type:** `application/json`
+
+<ParamField body="html" type="string" required>
+  The complete HTML document to render as a PDF. This string is loaded directly into the headless Chromium page via Puppeteer's `page.setContent()`. Inline styles and embedded scripts are supported; external resources must be reachable from the Lambda execution environment.
+</ParamField>
+
+<ParamField body="source" type="string">
+  An optional identifier for the request, used in Lambda log output to help trace individual conversions. Has no effect on the generated PDF. Example: `crude-oil-price-report`.
+</ParamField>
+
+<ParamField body="settings" type="object">
+  An optional object of Puppeteer [`page.pdf()` options](https://pptr.dev/api/puppeteer.pdfoptions) passed directly to the PDF renderer. Use this to control paper format, page dimensions, margins, background printing, and more. Example: `{ "format": "A4", "printBackground": true }`.
+</ParamField>
+
+## Example Request
+
+```shell
+curl 'https://{api-identifier}.execute-api.us-east-1.amazonaws.com/prod/print' \
+  -X 'POST' \
+  --output document.pdf \
+  --header 'Content-Type: application/json' \
+  --data-binary '{
+    "source": "sales-report",
+    "html": "<html><head><style>body { font-family: Arial; }</style></head><body><h1>Sales Report</h1><p>Q4 2024 results.</p></body></html>",
+    "settings": {
+      "format": "A4",
+      "printBackground": true,
+      "margin": { "top": "1cm", "bottom": "1cm", "left": "1cm", "right": "1cm" }
+    }
+  }'
+```
+
+## Example Request Body
+
+```json
+{
+  "source": "sales-report",
+  "html": "<html><head><style>body { font-family: Arial; }</style></head><body><h1>Sales Report</h1><p>Q4 2024 results.</p></body></html>",
+  "settings": {
+    "format": "A4",
+    "printBackground": true,
+    "margin": { "top": "1cm", "bottom": "1cm", "left": "1cm", "right": "1cm" }
+  }
+}
+```
+
+## Responses
+
+**`200 OK`** — `application/pdf`
+
+The request succeeded. The response body is the raw binary PDF file. When using `curl`, pass `--output <filename>.pdf` to write it to disk. In application code, read the response body as a byte stream or buffer.
+
+---
+
+**`400 Bad Request`** — `application/json`
+
+Returned when the required `html` field is absent from the request body. The error code is always `PRINT_FAILED_HTML_MISSING`.
+
+```json
+[
+  {
+    "value": {
+      "code": "PRINT_FAILED_HTML_MISSING",
+      "message": "Failed to print PDF, no HTML document provided."
+    },
+    "children": []
+  }
+]
+```
+
+---
+
+**`500 Internal Server Error`** — `application/json`
+
+Returned when Puppeteer or Chromium encounters an unrecoverable error during rendering. The error code is `REQUEST_GENERAL_FAILURE`.
+
+```json
+[
+  {
+    "value": {
+      "code": "REQUEST_GENERAL_FAILURE",
+      "message": "An attempt to print html page failed for unspecified reason(s)."
+    },
+    "children": []
+  }
+]
+```
+
+## Common `settings` Options
+
+The `settings` object is passed directly to Puppeteer's `page.pdf()` method. The following options cover the most common use cases:
+
+| Option | Type | Description |
+|---|---|---|
+| `format` | string | Paper format: `A4`, `Letter`, `Legal`, `Tabloid`, etc. |
+| `width` | string | Page width, e.g. `"800px"` or `"21cm"` |
+| `height` | string | Page height, e.g. `"600px"` or `"29.7cm"` |
+| `printBackground` | boolean | Print CSS backgrounds (default: `false`) |
+| `landscape` | boolean | Print in landscape orientation (default: `false`) |
+| `margin` | object | Page margins: `{ "top", "bottom", "left", "right" }` |
+| `scale` | number | Scale factor between `0.1` and `2` (default: `1`) |
+
+For the full list of available options, see the [Puppeteer `PdfOptions` reference](https://pptr.dev/api/puppeteer.pdfoptions).
+
+<Note>
+  Puppeteer waits for `networkidle0` — no network activity for at least 500 ms — before triggering the PDF print. Any external resources referenced in your HTML (fonts, images, stylesheets loaded from a remote URL) must be reachable from the Lambda execution environment. Resources that are slow or unreachable will delay the response and may cause the Lambda function to time out at the 30-second API Gateway limit.
+</Note>
+
+See [Request Body](/api/request-body) and [Responses](/api/responses) for full schema details.
