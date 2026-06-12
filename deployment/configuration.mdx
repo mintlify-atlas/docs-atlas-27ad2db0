@@ -1,5 +1,5 @@
 ---
-title: "Configure the Serverless PDF Generator Stack"
+title: "Configure the AWS Lambda PDF Generator Serverless Stack"
 sidebarTitle: "Configuration"
 description: "Customize the AWS Lambda PDF Generator deployment: Lambda memory, timeout, S3 bucket for large responses, CORS settings, and Node.js runtime."
 ---
@@ -13,7 +13,7 @@ The stack defines two Lambda functions. The resource-intensive `print` function 
 | Setting | `print` function | `serviceRead` function |
 |---|---|---|
 | **Runtime** | `nodejs20.x` | `nodejs20.x` |
-| **Memory** | 2048 MB | Default (128 MB) |
+| **Memory** | 2048 MB | Default (1024 MB) |
 | **Timeout** | 30 seconds | Default (6 seconds) |
 | **CloudWatch log retention** | 90 days | 90 days |
 
@@ -123,6 +123,9 @@ provider:
             - s3:GetObject
             - s3:PutObject
           Resource: arn:aws:s3:::${self:custom.s3.responseBucket}/*
+
+  apiGateway:
+    shouldStartNameWithService: true
 
 layers:
   HeadlessChromium:

@@ -1,7 +1,7 @@
 ---
-title: "AWS Lambda PDF Generator Release Notes"
+title: "AWS Lambda PDF Generator: Release Notes and Changelog"
 sidebarTitle: "Changelog"
-description: "Version history for the AWS Lambda PDF Generator: new features, breaking changes, bug fixes, and dependency updates across all releases."
+description: "Complete release history for AWS Lambda PDF Generator, covering new features, breaking changes, bug fixes, and dependency updates from v1.0.5 to v3.0.1."
 ---
 
 This page tracks every release of the AWS Lambda PDF Generator, from the initial public release (v1.0.5) through the current stable version (v3.0.1). Each entry summarises what changed, why it changed, and — where relevant — what you need to do when upgrading.
@@ -25,10 +25,6 @@ This release continues the modernisation effort started in v3.0.0, advancing bot
   </Accordion>
 </AccordionGroup>
 
-<Note>
-  If you are deploying from an existing v3.0.0 installation, run `serverless deploy` after updating your local dependencies. No endpoint or payload changes were introduced — the upgrade is a drop-in replacement.
-</Note>
-
 ---
 
 ## Version 3.0.0
@@ -41,7 +37,7 @@ This release resolves a long-standing compatibility issue that prevented the ser
     - Updated [Puppeteer](https://pptr.dev/) to **version 21** (from version 10).
   </Accordion>
   <Accordion title="Bug Fixes">
-    - Resolved an inability to run on **Node.js 16 and Node.js 18** by replacing the unmaintained [`aws-chrome-lambda`](https://github.com/alixaxel/chrome-aws-lambda) package with [`@sparticuz/chromium`](https://github.com/Sparticuz/chromium). The `@sparticuz/chromium` package is actively maintained and provides a pre-compiled Chromium binary optimised for the AWS Lambda environment.
+    - Resolved an inability to run on **Node.js 16 and Node.js 18** by replacing the unmaintained [`aws-chrome-lambda`](https://github.com/alixaxel/chrome-aws-lambda) package with [`@sparticuz/chromium`](https://github.com/Sparticuz/chromium).
   </Accordion>
   <Accordion title="Technical Enhancements">
     - Updated the Node.js Lambda runtime to **`nodejs18.x`** for all Lambda functions and layers.
@@ -50,10 +46,6 @@ This release resolves a long-standing compatibility issue that prevented the ser
     - Updated other dependencies explicitly and implicitly.
   </Accordion>
 </AccordionGroup>
-
-<Note>
-  The switch from `aws-chrome-lambda` to `@sparticuz/chromium` is an internal dependency change only. Your API requests, response shapes, and `serverless.yml` configuration remain compatible with v2.x — no changes to calling code are required.
-</Note>
 
 ---
 
@@ -64,7 +56,7 @@ A housekeeping release with no functional or API changes.
 <AccordionGroup>
   <Accordion title="Other">
     - Applied minor corrections to the [documentation website](https://barchart.github.io/aws-lambda-pdf-generator/#).
-    - Regenerated the `yarn.lock` file to resolve dependency tree inconsistencies.
+    - Regenerated the `yarn.lock` file.
   </Accordion>
 </AccordionGroup>
 
@@ -76,13 +68,13 @@ This release adds a version-inspection endpoint to the API and refreshes the und
 
 <AccordionGroup>
   <Accordion title="New Features">
-    - Added the **`GET /service/version`** endpoint to the API. This endpoint returns the currently deployed version of the service and can be used for health-checks and deployment verification.
+    - Added the **`GET /service/version`** endpoint to the API.
   </Accordion>
   <Accordion title="Technical Enhancements">
     - Updated the Node.js Lambda runtime to **version 14**.
     - Updated AWS CodeBuild to use Node.js version 14.
     - Updated the [Serverless framework](https://www.serverless.com/) to **version 3**.
-    - Updated [`puppeteer`](https://github.com/puppeteer/puppeteer), [`puppeteer-core`](https://github.com/puppeteer/puppeteer), and [`chrome-aws-lambda`](https://github.com/alixaxel/chrome-aws-lambda) to **version 10.1.0**. Puppeteer 14 was available at the time of this release; however, `chrome-aws-lambda` did not support any version beyond 10.1.0. See the [API `README.md`](https://github.com/barchart/aws-lambda-pdf-generator/tree/master/packages/api#technical-notes) for more detail.
+    - Updated [`puppeteer`](https://github.com/puppeteer/puppeteer), [`puppeteer-core`](https://github.com/puppeteer/puppeteer), and [`chrome-aws-lambda`](https://github.com/alixaxel/chrome-aws-lambda) to **version 10.1.0**. Puppeteer version 14 is available; however, at present the `chrome-aws-lambda` library does not support any version past 10.1.0. More detail can be found in the [`README.md`](https://github.com/barchart/aws-lambda-pdf-generator/tree/master/packages/api#technical-notes) file for the API.
     - Updated various other dependencies.
   </Accordion>
 </AccordionGroup>
@@ -91,51 +83,36 @@ This release adds a version-inspection endpoint to the API and refreshes the und
 
 ## Version 2.0.0
 
-Version 2.0.0 is a major release that introduces breaking API changes, adds support for generating large PDFs, and restructures the project internals as a Lerna monorepo. **Existing deployments must be removed before upgrading.**
+Version 2.0.0 is a major release that introduces breaking API changes, adds support for generating large PDFs, and restructures the project internals as a Lerna monorepo.
 
 <Warning>
   **Breaking changes are present in this release.**
 
-  - The `print/v81` and `print/v83` versioned endpoints have been **removed**. Only the unversioned `print` endpoint remains. Update any clients or integrations that call the old paths.
-  - The application has been **renamed**. Deploying over an existing v1.x installation without first removing it will create a naming conflict. Run `sls remove` against your current deployment before deploying v2.0.0.
+  - The `print/v81` and `print/v83` versioned endpoints have been **removed**. Only the `print` endpoint remains.
+  - The application has been **renamed**. Avoid problems by removing previous installations first (see the `sls remove` command).
 </Warning>
 
 <AccordionGroup>
   <Accordion title="New Features">
-    - **PDF files larger than 10 MB** are now supported. The service handles oversized responses in two ways:
-      - **Gzip compression** — the response body is compressed before being returned, keeping the payload within API Gateway limits for moderately large documents.
-      - **HTTP 303 redirect** — for documents that exceed the compressed threshold, the service returns an HTTP 303 (See Other) response pointing to a pre-signed S3 URL where the PDF can be downloaded directly.
+    - **PDF files larger than 10 MB** are now supported, using gzip compression or an HTTP 303 response.
   </Accordion>
   <Accordion title="Technical Enhancements">
-    - Converted the project to a **[Lerna](https://github.com/lerna/lerna) monorepo** layout, separating the API package from shared tooling and making future multi-package development more maintainable.
-    - Upgraded the [Serverless framework](https://www.serverless.com/) to **version 2.13.0** or later.
-    - Added descriptive `description` fields for the application and individual functions in `serverless.yml`.
-    - Updated the bundled Chromium version from **v83 to v88**.
+    - Converted the project to use a **[Lerna](https://github.com/lerna/lerna)** approach.
+    - Upgraded the [Serverless](https://www.serverless.com/) framework to **version 2.13.0** (or better).
+    - Added `description` fields for the application and functions to `serverless.yml`.
+    - Updated the bundled Chromium version from **`v83` to `v88`**.
   </Accordion>
 </AccordionGroup>
-
-<Note>
-  **Migration steps for v1.x → v2.0.0:**
-
-  1. Tear down the existing deployment: `sls remove --stage <your-stage>`
-  2. Update your code to call `POST /print` instead of `POST /print/v81` or `POST /print/v83`.
-  3. Deploy the new version: `sls deploy --stage <your-stage>`
-  4. Update any clients that hard-code the old endpoint paths.
-</Note>
 
 ---
 
 ## Version 1.1.1
 
-This release improves observability and extends the request schema, with no breaking changes.
+A documentation-only release. No functional or API changes were made.
 
 <AccordionGroup>
-  <Accordion title="New Features">
-    - Added a `source` field to the print request body. This optional string field lets callers tag requests with an identifier (e.g. an application name or team) for tracing and audit purposes.
-  </Accordion>
-  <Accordion title="Other">
-    - Added typed printer failure categories to improve error classification and downstream error-handling logic.
-    - Improved internal logging for easier debugging and monitoring of Lambda execution.
+  <Accordion title="No Functional Changes">
+    - Finalized the [documentation website](https://barchart.github.io/aws-lambda-pdf-generator/#/).
   </Accordion>
 </AccordionGroup>
 
@@ -143,11 +120,15 @@ This release improves observability and extends the request schema, with no brea
 
 ## Version 1.1.0
 
-A documentation-only release. No functional or API changes were made.
+This release improves observability and extends the request schema, with no breaking changes.
 
 <AccordionGroup>
-  <Accordion title="No Functional Changes">
-    - Applied minor fixes to the documentation website. The deployed service is identical to v1.0.5.
+  <Accordion title="New Features">
+    - Added a `source` field to the print request body.
+  </Accordion>
+  <Accordion title="Other">
+    - Added printer failure types.
+    - Improved logging.
   </Accordion>
 </AccordionGroup>
 
@@ -155,13 +136,10 @@ A documentation-only release. No functional or API changes were made.
 
 ## Version 1.0.5
 
-The initial public release of the AWS Lambda PDF Generator. This version establishes the core serverless architecture: an AWS API Gateway endpoint backed by an AWS Lambda function that drives a headless Chromium browser via Puppeteer to render HTML and produce PDF output.
+The initial public release of the AWS Lambda PDF Generator.
 
 <AccordionGroup>
   <Accordion title="Initial Public Release">
     - First publicly available version of the service.
-    - Provides the `POST /print` endpoint for converting HTML to PDF.
-    - Built on AWS API Gateway, AWS Lambda, [Puppeteer](https://pptr.dev/), and headless Chromium.
-    - Deployed and managed via the [Serverless framework](https://www.serverless.com/).
   </Accordion>
 </AccordionGroup>

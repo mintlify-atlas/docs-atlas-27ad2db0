@@ -1,7 +1,7 @@
 ---
 title: "PDF Generator API Reference Overview"
 sidebarTitle: "Overview"
-description: "Overview of the AWS Lambda PDF Generator REST API: two endpoints for PDF generation and service metadata, with JSON request bodies and binary PDF responses."
+description: "Overview of the AWS Lambda PDF Generator REST API: two endpoints for PDF generation and service metadata, JSON request bodies, and binary PDF responses."
 ---
 
 The AWS Lambda PDF Generator exposes a lightweight REST API deployed via AWS API Gateway. Every HTTP request is handled by an AWS Lambda function that loads Puppeteer and headless Chromium to convert HTML documents into binary PDF files. The API surface is intentionally minimal: one endpoint renders PDFs and a second returns service metadata. No built-in authentication is required to call the service within your own AWS account, though standard API Gateway security mechanisms can be layered on top at any time.

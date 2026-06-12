@@ -1,7 +1,7 @@
 ---
 title: "Test the PDF Generator Locally and After Deployment"
 sidebarTitle: "Testing"
-description: "Invoke the PDF Generator Lambda locally with the Serverless CLI, and test the live endpoint with curl after deploying to AWS."
+description: "Invoke the PDF Generator Lambda locally with the Serverless CLI, and validate the live API Gateway endpoint with curl after deploying to AWS."
 ---
 
 The PDF Generator can be exercised at two distinct stages of the development lifecycle: locally before any AWS resources exist, and against the live deployed endpoint after a successful `yarn deploy:prod` or `yarn deploy:stage`. Local invocation uses the Serverless CLI to simulate the Lambda execution environment on your machine, which is useful for rapid iteration. Post-deployment testing validates the full AWS path — API Gateway, Lambda cold start, Chromium layer, and S3 large-response handling — using plain HTTP clients such as `curl`.

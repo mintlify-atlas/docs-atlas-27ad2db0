@@ -1,7 +1,7 @@
 ---
-title: "Get Started with AWS Lambda PDF Generator"
+title: "AWS Lambda PDF Generator: Deploy and Generate Your First PDF"
 sidebarTitle: "Quickstart"
-description: "Deploy the AWS Lambda PDF Generator to your AWS account and convert your first HTML document to a PDF in under 10 minutes."
+description: "Deploy the AWS Lambda PDF Generator to your own AWS account and convert an HTML document to a downloadable PDF in under 10 minutes using curl."
 ---
 
 This guide walks you through everything you need to go from zero to a working PDF generation endpoint. By the end, you will have cloned the repository, deployed the service to your AWS account using the Serverless framework, and used `curl` to convert an HTML snippet into a downloadable PDF file.
@@ -48,7 +48,7 @@ This guide walks you through everything you need to go from zero to a working PD
 
     When the deployment completes, the CLI output will include your API Gateway base URL. It will look similar to:
 
-    ```
+    ```text
     endpoints:
       POST - https://{api-identifier}.execute-api.us-east-1.amazonaws.com/prod/print
     ```
